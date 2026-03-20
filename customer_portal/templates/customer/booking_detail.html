@@ -1,0 +1,452 @@
+{% extends "customer/base.html" %}
+{% block title %}Ride #{{ booking._id[:8].upper() }} — E-TukTukGo{% endblock %}
+
+{% block extra_css %}
+<style>
+  .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; }
+  .info-box    { background:var(--surface-2); border-radius:12px; padding:1rem; }
+  .info-label  { font-size:.72rem; font-weight:600; color:var(--text-3); text-transform:uppercase; letter-spacing:.04em; margin-bottom:.3rem; }
+  .info-value  { font-size:.92rem; font-weight:600; }
+
+  #ride-map { width:100%; height:320px; border-radius:16px; border:1.5px solid var(--border); box-shadow:var(--shadow-md); overflow:hidden; background:var(--surface-2); }
+  .map-toolbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:.5rem; margin-bottom:.6rem; }
+  .map-legend  { display:flex; gap:.9rem; flex-wrap:wrap; font-size:.73rem; color:var(--text-3); margin-top:.5rem; }
+  .leg-dot     { width:10px; height:10px; border-radius:50%; display:inline-block; border:2px solid #fff; box-shadow:0 1px 3px rgba(0,0,0,.2); vertical-align:middle; }
+  .dist-badge  { display:inline-flex; align-items:center; gap:.35rem; background:var(--info-lt); border:1px solid var(--info); border-radius:20px; padding:.28rem .75rem; font-size:.75rem; font-weight:600; color:var(--info); }
+  .eta-badge   { display:inline-flex; align-items:center; gap:.35rem; background:var(--brand-lt); border:1px solid var(--brand); border-radius:20px; padding:.28rem .75rem; font-size:.75rem; font-weight:600; color:var(--brand); }
+
+  .tracker     { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:1.4rem; }
+  .track-step  { display:flex; align-items:flex-start; gap:1rem; }
+  .t-left      { display:flex; flex-direction:column; align-items:center; }
+  .t-dot       { width:30px; height:30px; border-radius:50%; border:2px solid var(--border-md); background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:.8rem; flex-shrink:0; transition:all .3s; }
+  .track-step.done   .t-dot { border-color:var(--brand); background:var(--brand); color:#fff; }
+  .track-step.active .t-dot { border-color:var(--brand); background:var(--brand-lt); color:var(--brand); animation:pulse 1.5s ease infinite; }
+  .t-line      { width:2px; height:26px; background:var(--border); }
+  .track-step.done .t-line { background:var(--brand); }
+  .track-step:last-child .t-line { display:none; }
+  .t-body      { padding-bottom:1rem; flex:1; }
+  .t-label     { font-weight:600; font-size:.88rem; }
+  .t-sub       { font-size:.76rem; color:var(--text-3); margin-top:.1rem; }
+
+  .driver-bar  { background:var(--surface); border:1.5px solid var(--brand); border-radius:16px; padding:1.1rem; display:flex; align-items:center; gap:1rem; }
+  .drv-ava-lg  { width:52px; height:52px; border-radius:50%; border:2.5px solid var(--brand); overflow:hidden; background:var(--surface-2); display:flex; align-items:center; justify-content:center; font-size:1.5rem; flex-shrink:0; }
+  .pay-lock    { background:var(--warning-lt); border:1.5px dashed var(--warning); border-radius:16px; padding:1.25rem; text-align:center; }
+  .pay-unlock  { background:var(--brand-lt); border:1.5px solid var(--brand); border-radius:16px; padding:1.25rem; text-align:center; }
+
+  @keyframes gpsPulse { 0%,100%{box-shadow:0 0 0 3px rgba(30,132,73,.25)} 50%{box-shadow:0 0 0 8px rgba(30,132,73,.08)} }
+  @media(max-width:640px){ .detail-grid{grid-template-columns:1fr;} #ride-map{height:240px;} }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-wrap-sm">
+
+  <!-- Header -->
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:.75rem;margin-bottom:1.5rem">
+    <div>
+      <div style="font-size:.73rem;color:var(--text-3);margin-bottom:.2rem">Booking Reference</div>
+      <div style="font-family:var(--font-h);font-size:1.4rem;font-weight:800">#{{ booking._id[:8].upper() }}</div>
+    </div>
+    <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
+      {% set st=booking.status %}
+      {% if st=='pending'      %}<span class="badge badge-warning">⏳ Pending</span>
+      {% elif st=='confirmed'  %}<span class="badge badge-success">✓ Confirmed</span>
+      {% elif st=='in_progress'%}<span class="badge badge-info pulse-anim">🔴 Live</span>
+      {% elif st=='completed'  %}<span class="badge badge-muted">✓ Done</span>
+      {% elif st=='cancelled'  %}<span class="badge badge-danger">✗ Cancelled</span>{% endif %}
+      <a href="/booking/my" class="btn btn-secondary btn-sm">← My Rides</a>
+    </div>
+  </div>
+
+  <!-- ══ LIVE MAP ══ -->
+  <div style="margin-bottom:1.5rem">
+    <div class="map-toolbar">
+      <div>
+        <div style="font-family:var(--font-h);font-weight:700;font-size:.95rem" id="map-title">
+          {% if booking.status=='in_progress' %}🔴 Live Driver Tracking
+          {% elif booking.status=='confirmed' %}📍 Driver Assigned — Route Map
+          {% elif booking.status=='completed' %}✅ Completed Route
+          {% else %}📍 Booking Location{% endif %}
+        </div>
+        <div style="font-size:.73rem;color:var(--text-3);margin-top:.1rem" id="map-status-txt">
+          {% if booking.status in ('confirmed','in_progress') %}Driver location updates every 5s{% else %}Showing ride route{% endif %}
+        </div>
+      </div>
+      <div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center" id="dist-badges">
+        {% if booking.distance_km %}
+        <span class="dist-badge"><i class="fa fa-road"></i> {{ booking.distance_km }}km</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div id="ride-map">
+      <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-3);font-size:.85rem">
+        <i class="fa fa-spinner spin" style="margin-right:.5rem"></i> Loading map...
+      </div>
+    </div>
+
+    <div class="map-legend">
+      <span><span class="leg-dot" style="background:#1E8449"></span> 🛺 Driver</span>
+      <span><span class="leg-dot" style="background:#2196F3"></span> Your Pickup</span>
+      {% if booking.dropoff_lat and booking.dropoff_lat != 0 %}
+      <span><span class="leg-dot" style="background:#C0392B"></span> Drop-off</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Route -->
+  <div style="background:var(--surface-2);border-radius:12px;padding:1rem;margin-bottom:1.25rem">
+    <div style="display:flex;align-items:flex-start;gap:.6rem;font-size:.87rem;margin-bottom:.3rem">
+      <div style="width:9px;height:9px;border-radius:50%;background:var(--brand);flex-shrink:0;margin-top:.3rem"></div>
+      <div><div style="font-size:.65rem;color:var(--text-3)">PICKUP</div>{{ booking.pickup_address }}</div>
+    </div>
+    {% if booking.dropoff_address %}
+    <div style="width:2px;height:12px;background:var(--border-md,#C8D0DC);margin:.2rem 0 .2rem 3.5px"></div>
+    <div style="display:flex;align-items:flex-start;gap:.6rem;font-size:.87rem">
+      <div style="width:9px;height:9px;border-radius:50%;background:var(--danger);flex-shrink:0;margin-top:.3rem"></div>
+      <div><div style="font-size:.65rem;color:var(--text-3)">DROP-OFF</div>{{ booking.dropoff_address }}</div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Info grid -->
+  <div class="detail-grid" style="margin-bottom:1.25rem">
+    <div class="info-box">
+      <div class="info-label">Fare</div>
+      <div class="info-value" style="color:var(--brand);font-size:1.15rem;font-family:var(--font-h)">₹{{ "%.2f"|format(booking.fare) }}</div>
+    </div>
+    <div class="info-box">
+      <div class="info-label">Payment</div>
+      <div class="info-value" id="pay-badge">
+        {% if booking.payment_status=='paid' %}<span class="badge badge-success">✓ Paid</span>
+        {% elif booking.payment_locked %}<span class="badge badge-warning">🔒 Locked</span>
+        {% else %}<span class="badge badge-danger">Unpaid</span>{% endif %}
+      </div>
+    </div>
+    <div class="info-box"><div class="info-label">Duration</div><div class="info-value">{{ booking.hours }}h</div></div>
+    <div class="info-box"><div class="info-label">Booked</div><div class="info-value" style="font-size:.82rem">{{ booking.created_at[:16] if booking.created_at else '—' }}</div></div>
+  </div>
+
+  <!-- Payment section -->
+  <div id="pay-section" style="margin-bottom:1.25rem">
+    {% if booking.payment_status=='paid' %}
+    <div style="background:var(--brand-lt);border:1.5px solid var(--brand);border-radius:16px;padding:1.2rem;display:flex;align-items:center;gap:1rem">
+      <div style="width:42px;height:42px;border-radius:50%;background:var(--brand);display:flex;align-items:center;justify-content:center;color:#fff;font-size:1.1rem;flex-shrink:0">✓</div>
+      <div><div style="font-weight:700;color:var(--brand)">Payment Complete</div><div style="font-size:.82rem;color:var(--text-2)">₹{{ "%.2f"|format(booking.fare) }} paid securely</div></div>
+    </div>
+    {% elif booking.payment_locked %}
+    <div class="pay-lock">
+      <div style="font-size:2rem;margin-bottom:.4rem">🔒</div>
+      <div style="font-family:var(--font-h);font-weight:700;margin-bottom:.3rem">Payment Locked</div>
+      <div style="font-size:.84rem;color:var(--text-2);margin-bottom:.8rem">₹{{ "%.2f"|format(booking.fare) }} unlocks once a driver accepts your ride.</div>
+      <div class="pulse-anim" style="font-size:.78rem;color:var(--text-3)">⏳ Waiting for driver to accept...</div>
+    </div>
+    {% else %}
+    <div class="pay-unlock">
+      <div style="font-size:2rem;margin-bottom:.4rem">🔓</div>
+      <div style="font-family:var(--font-h);font-weight:700;color:var(--brand);margin-bottom:.3rem">Driver Accepted! Pay Now</div>
+      <div style="font-size:.84rem;color:var(--text-2);margin-bottom:1rem">Complete payment to confirm your ride.</div>
+      <a href="/payment/checkout/{{ booking._id }}" class="btn btn-primary btn-lg" style="justify-content:center">
+        <i class="fa fa-lock-open"></i> Pay ₹{{ "%.2f"|format(booking.fare) }}
+      </a>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Driver bar -->
+  {% if driver %}
+  <div class="driver-bar" style="margin-bottom:1.25rem">
+    <div class="drv-ava-lg">{% if driver.avatar %}<img src="{{ driver.avatar }}" style="width:100%;height:100%;object-fit:cover">{% else %}🧑{% endif %}</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-family:var(--font-h);font-weight:700">{{ driver.name }}</div>
+      <div style="font-size:.78rem;color:var(--text-3)">{{ driver.vehicle_number or '' }}</div>
+      <div style="color:#F59E0B;font-size:.8rem;margin-top:.1rem">{{ '★'*(driver.rating|int) }} {{ driver.rating }}</div>
+    </div>
+    {% if driver.phone %}<a href="tel:{{ driver.phone }}" class="btn btn-outline btn-sm"><i class="fa fa-phone"></i> Call</a>{% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Status tracker -->
+  {% if booking.status != 'cancelled' %}
+  <div class="tracker" style="margin-bottom:1.25rem">
+    <div style="font-family:var(--font-h);font-weight:700;margin-bottom:1rem"><i class="fa fa-location-dot" style="color:var(--brand)"></i> Ride Status</div>
+    {% for label,sub,stats in [
+      ('Booking Placed','Waiting for a driver to accept','pending confirmed in_progress completed'),
+      ('Driver Accepted','Payment is now unlocked','confirmed in_progress completed'),
+      ('Ride In Progress','Your TukTuk is on the way!','in_progress completed'),
+      ('Ride Completed','Thank you for riding!','completed'),
+    ] %}
+    {% set sl=stats.split() %}
+    <div class="track-step {% if booking.status in sl %}done{% elif loop.index0==1 and booking.status=='pending' %}active{% endif %}">
+      <div class="t-left">
+        <div class="t-dot">{% if booking.status in sl %}✓{% elif loop.index0==1 and booking.status=='pending' %}⏳{% else %}{{ loop.index }}{% endif %}</div>
+        <div class="t-line"></div>
+      </div>
+      <div class="t-body"><div class="t-label">{{ label }}</div><div class="t-sub">{{ sub }}</div></div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if booking.status in ('pending','confirmed') and booking.payment_status!='paid' %}
+  <button class="btn btn-danger btn-sm" onclick="cancelRide('{{ booking._id }}')"><i class="fa fa-xmark"></i> Cancel Booking</button>
+  {% endif %}
+
+  {% if payment %}
+  <div class="card card-p" style="margin-top:1.25rem">
+    <div class="card-title"><i class="fa fa-receipt" style="color:var(--text-3)"></i> Payment Receipt</div>
+    <div style="font-size:.82rem;display:grid;gap:.35rem;color:var(--text-2)">
+      <div>ID: <span style="color:var(--text-1);font-weight:600">{{ payment.razorpay_payment_id }}</span></div>
+      <div>Amount: <span style="color:var(--brand);font-weight:700">₹{{ "%.2f"|format(payment.amount) }}</span></div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+'use strict';
+
+var BID  = '{{ booking._id }}';
+var STAT = '{{ booking.status }}';
+var PLCK = {{ 'true' if booking.payment_locked else 'false' }};
+var FARE = {{ booking.fare }};
+var MT   = '8DcBKk2W2VGTtOYBBBgk';
+
+// Safe coord parse — returns 0 for empty/invalid
+function safeCoord(v){ var n=parseFloat(v); return isNaN(n)?0:n; }
+var PLAT = safeCoord('{{ booking.pickup_lat  or "" }}');
+var PLNG = safeCoord('{{ booking.pickup_lng  or "" }}');
+var DLAT = safeCoord('{{ booking.dropoff_lat or "" }}');
+var DLNG = safeCoord('{{ booking.dropoff_lng or "" }}');
+
+var map       = null;
+var drvMarker = null;
+var puMarker  = null;
+var doMarker  = null;
+var lastDrvLat = 0, lastDrvLng = 0;
+var pollTimer = null;
+
+// ── Init map ──────────────────────────────────────────────────────────────────
+function initMap(){
+  var el = document.getElementById('ride-map');
+  if(!el) return;
+
+  // Choose center: pickup if available, else India center
+  var cx = PLNG || 78.9629, cy = PLAT || 20.5937;
+  var zoom = (PLAT && PLNG) ? 14 : 5;
+
+  map = new maplibregl.Map({
+    container: 'ride-map',
+    style: 'https://api.maptiler.com/maps/hybrid-v4/style.json?key=' + MT,
+    center: [cx, cy],
+    zoom: zoom,
+    attributionControl: false
+  });
+  map.addControl(new maplibregl.NavigationControl(), 'top-right');
+  map.addControl(new maplibregl.AttributionControl({compact:true}), 'bottom-right');
+
+  map.on('load', function(){
+    // Place fixed pins
+    if(PLAT && PLNG){
+      puMarker = makePin(PLNG, PLAT, '#2196F3', '📍',
+        '<strong>Your Pickup</strong><br><small>{{ booking.pickup_address|replace("'","") }}</small>');
+    }
+    if(DLAT && DLNG){
+      doMarker = makePin(DLNG, DLAT, '#C0392B', '🏁',
+        '<strong>Drop-off</strong><br><small>{{ booking.dropoff_address|replace("'","") }}</small>');
+    }
+
+    // Draw static route if both points exist
+    if(PLAT && PLNG && DLAT && DLNG){
+      drawRoute(PLNG+','+PLAT, DLNG+','+DLAT, false);
+    }
+
+    // Fit map to show all pins
+    fitBounds(null, null);
+
+    // Start live polling for active bookings
+    if(STAT === 'confirmed' || STAT === 'in_progress'){
+      pollDriver();
+      pollTimer = setInterval(pollDriver, 5000);
+    }
+  });
+}
+
+// ── Create a map pin marker ───────────────────────────────────────────────────
+function makePin(lng, lat, color, emoji, popupHtml){
+  var el = document.createElement('div');
+  el.style.cssText = [
+    'width:36px','height:36px','border-radius:50%',
+    'background:'+color,'border:3px solid #fff',
+    'display:flex','align-items:center','justify-content:center',
+    'font-size:.95rem','cursor:pointer',
+    'box-shadow:0 2px 10px rgba(0,0,0,.28)'
+  ].join(';');
+  el.textContent = emoji;
+  return new maplibregl.Marker({element:el})
+    .setLngLat([lng, lat])
+    .setPopup(new maplibregl.Popup({offset:20, closeButton:false}).setHTML(popupHtml))
+    .addTo(map);
+}
+
+// ── Draw / update road route + distance ──────────────────────────────────────
+function drawRoute(fromWp, toWp, includeDriver){
+  // fromWp and toWp are "lng,lat" strings
+  // If includeDriver: wp = driverPos;pickup;dropoff
+  var wp = includeDriver
+    ? (fromWp + ';' + PLNG+','+PLAT + (DLAT&&DLNG ? ';'+DLNG+','+DLAT : ''))
+    : (PLNG+','+PLAT + (DLAT&&DLNG ? ';'+DLNG+','+DLAT : ''));
+
+  if(!wp || wp === '0,0') return;
+
+  fetch('https://api.maptiler.com/directions/v2/driving/' + wp + '?key=' + MT)
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if(!data.routes || !data.routes[0]) return;
+      var route = data.routes[0];
+      var km    = (route.distance / 1000).toFixed(1);
+      var mins  = Math.round(route.duration / 60);
+
+      // Update distance badges
+      var badges = document.getElementById('dist-badges');
+      if(badges){
+        badges.innerHTML =
+          '<span class="dist-badge"><i class="fa fa-road"></i> ' + km + ' km</span>' +
+          '<span class="eta-badge"><i class="fa fa-clock"></i> ~' + mins + ' min</span>';
+      }
+
+      // Draw/update route line
+      var geom = route.geometry;
+      if(map.getSource('route')){
+        map.getSource('route').setData({type:'Feature', geometry:geom});
+      } else {
+        map.addSource('route', {type:'geojson', data:{type:'Feature', geometry:geom}});
+        map.addLayer({
+          id:'route-line', type:'line', source:'route',
+          layout:{'line-join':'round','line-cap':'round'},
+          paint:{'line-color':'#1E8449','line-width':4,'line-opacity':.85}
+        });
+      }
+    })
+    .catch(function(){});
+}
+
+// ── Poll driver live location every 5s ───────────────────────────────────────
+function pollDriver(){
+  fetch('/booking/api/driver-location/' + BID)
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+
+      // Handle payment unlock
+      if(PLCK && data.payment_locked === false){
+        PLCK = false;
+        var ps = document.getElementById('pay-section');
+        if(ps) ps.innerHTML =
+          '<div class="pay-unlock">' +
+          '<div style="font-size:2rem;margin-bottom:.4rem">🔓</div>' +
+          '<div style="font-family:var(--font-h);font-weight:700;color:var(--brand);margin-bottom:.3rem">Driver Accepted!</div>' +
+          '<div style="font-size:.84rem;color:var(--text-2);margin-bottom:1rem">Complete payment to confirm your ride.</div>' +
+          '<a href="/payment/checkout/'+BID+'" class="btn btn-primary btn-lg" style="justify-content:center">' +
+          '<i class="fa fa-lock-open"></i> Pay ₹'+FARE.toFixed(2)+'</a></div>';
+      }
+
+      // Handle status change — reload page
+      if(data.booking_status && data.booking_status !== STAT){
+        location.reload();
+        return;
+      }
+
+      // No driver location yet
+      if(!data.driver || !data.driver.lat || !data.driver.lng){
+        var t = document.getElementById('map-status-txt');
+        if(t) t.textContent = 'Waiting for driver GPS...';
+        return;
+      }
+
+      var dv = data.driver;
+      var dLat = parseFloat(dv.lat), dLng = parseFloat(dv.lng);
+
+      // Place driver marker or move it
+      if(!drvMarker){
+        var el = document.createElement('div');
+        el.style.cssText = [
+          'width:38px','height:38px','border-radius:50%',
+          'background:#1E8449','border:3px solid #fff',
+          'display:flex','align-items:center','justify-content:center',
+          'font-size:1.05rem',
+          'box-shadow:0 2px 12px rgba(0,0,0,.3)',
+          'animation:gpsPulse 2s ease-in-out infinite'
+        ].join(';');
+        el.textContent = '🛺';
+        drvMarker = new maplibregl.Marker({element:el})
+          .setLngLat([dLng, dLat])
+          .setPopup(new maplibregl.Popup({offset:22, closeButton:false})
+            .setHTML('<strong>'+esc(dv.name)+'</strong><br>⭐ '+dv.rating+'<br><small>'+esc(dv.vehicle)+'</small>'))
+          .addTo(map);
+      } else {
+        drvMarker.setLngLat([dLng, dLat]);
+      }
+
+      // Update status text
+      var t = document.getElementById('map-status-txt');
+      if(t) t.textContent = '🛺 Driver location live — ' + new Date().toLocaleTimeString();
+
+      // Redraw route if driver moved more than ~100m
+      var moved = haversine(lastDrvLat, lastDrvLng, dLat, dLng) > 0.1;
+      if(moved || lastDrvLat === 0){
+        lastDrvLat = dLat; lastDrvLng = dLng;
+        // Route: driver → pickup → dropoff
+        drawRoute(dLng+','+dLat, null, true);
+        // Re-fit bounds to include driver
+        fitBounds(dLat, dLng);
+      }
+    })
+    .catch(function(){});
+}
+
+// ── Fit map to show driver + pickup + dropoff ─────────────────────────────────
+function fitBounds(dLat, dLng){
+  if(!map) return;
+  var pts = [];
+  if(PLAT && PLNG) pts.push([PLNG, PLAT]);
+  if(DLAT && DLNG) pts.push([DLNG, DLAT]);
+  if(dLat && dLng) pts.push([dLng, dLat]);
+  if(pts.length === 0) return;
+  if(pts.length === 1){ map.flyTo({center:pts[0], zoom:15, duration:600}); return; }
+  var bounds = new maplibregl.LngLatBounds(pts[0], pts[0]);
+  pts.forEach(function(p){ bounds.extend(p); });
+  map.fitBounds(bounds, {padding:60, maxZoom:15, duration:800});
+}
+
+// ── Haversine distance (km) ───────────────────────────────────────────────────
+function haversine(lat1, lng1, lat2, lng2){
+  if(!lat1||!lat2) return 99;
+  var R=6371, dLat=(lat2-lat1)*Math.PI/180, dLng=(lng2-lng1)*Math.PI/180;
+  var a=Math.sin(dLat/2)*Math.sin(dLat/2)+
+        Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
+        Math.sin(dLng/2)*Math.sin(dLng/2);
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+window.cancelRide = function(id){
+  if(!confirm('Cancel this booking?')) return;
+  fetch('/booking/'+id+'/cancel',{method:'POST'})
+    .then(function(r){return r.json();})
+    .then(function(d){ if(d.success) location.reload(); else alert(d.error||'Cannot cancel.'); });
+};
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', initMap);
+} else {
+  initMap();
+}
+
+})();
+</script>
+{% endblock %}

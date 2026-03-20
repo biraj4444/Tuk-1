@@ -1,0 +1,439 @@
+{% extends "driver/base.html" %}
+{% block title %}Dashboard — Driver Hub{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+  .dash-grid { display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; }
+  .span-2    { grid-column:1/-1; }
+
+  /* Big online toggle */
+  .online-hero {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--radius-lg); padding:1.75rem; text-align:center;
+    position:relative; overflow:hidden; box-shadow:var(--shadow-sm);
+  }
+  .online-hero::before {
+    content:''; position:absolute; top:0; left:0; right:0; height:3px;
+    background:linear-gradient(90deg,var(--brand),#27AE60);
+  }
+  .toggle-outer {
+    width:80px; height:44px; border-radius:22px;
+    border:2px solid var(--border); background:var(--surface-2);
+    cursor:pointer; position:relative; transition:all .3s;
+    margin:1.1rem auto; display:flex; align-items:center; outline:none;
+  }
+  .toggle-outer.on { background:var(--brand); border-color:var(--brand); box-shadow:0 0 20px rgba(30,132,73,.25); }
+  .toggle-knob {
+    width:34px; height:34px; border-radius:50%; background:#fff;
+    position:absolute; left:3px; top:3px; transition:transform .3s;
+    display:flex; align-items:center; justify-content:center;
+    font-size:1rem; box-shadow:var(--shadow-sm);
+  }
+  .toggle-outer.on .toggle-knob { transform:translateX(36px); }
+  .hero-title { font-family:var(--font-h); font-size:1.1rem; font-weight:700; margin-bottom:.2rem; }
+  .hero-sub   { font-size:.82rem; color:var(--text-3); }
+
+  /* Request cards */
+  .req-card {
+    background:var(--surface); border:1.5px solid var(--border);
+    border-radius:var(--radius-lg); padding:1.1rem; margin-bottom:.75rem;
+    transition:all .2s; animation:slideIn .3s ease;
+  }
+  .req-card:hover { border-color:var(--brand); box-shadow:var(--shadow-md); }
+  .req-card.assigned { border-color:var(--accent); background:var(--accent-lt); }
+  .req-route { font-size:.9rem; font-weight:600; margin-bottom:.45rem; }
+  .req-meta  { display:flex; gap:.6rem; flex-wrap:wrap; font-size:.77rem; color:var(--text-3); margin-bottom:.85rem; }
+  .req-fare  { color:var(--brand); font-weight:700; font-family:var(--font-h); }
+  .req-actions { display:flex; gap:.6rem; }
+
+  /* Active ride */
+  .active-card {
+    background:linear-gradient(135deg,var(--info-lt),var(--brand-lt));
+    border:1.5px solid var(--brand); border-radius:var(--radius-lg); padding:1.25rem;
+  }
+
+  @media(max-width:700px){ .dash-grid{grid-template-columns:1fr;} .span-2{grid-column:auto;} }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{% if driver.approval == 'pending' %}
+<div class="approval-banner fade-up">
+  <i class="fa fa-clock"></i>
+  <div><strong>Account Pending Approval</strong> — Admin must approve your account before you can go online.</div>
+</div>
+{% endif %}
+
+{% if driver.approval == 'rejected' %}
+<div style="background:var(--danger-lt);border:1px solid var(--danger);border-radius:var(--radius-md);padding:.9rem 1.1rem;margin-bottom:1.25rem;display:flex;gap:.6rem;font-size:.86rem;color:var(--danger)">
+  <i class="fa fa-circle-xmark"></i>
+  <div><strong>Account Rejected</strong> — Please contact support or re-register with correct documents.</div>
+</div>
+{% endif %}
+
+<!-- Stats Row -->
+<div class="stats-row fade-up">
+  <div class="stat-card green">
+    <div class="stat-icon">💰</div>
+    <div class="stat-value">₹{{ "%.0f"|format(today_earnings) }}</div>
+    <div class="stat-label">Today's Earnings</div>
+  </div>
+  <div class="stat-card orange">
+    <div class="stat-icon">🛺</div>
+    <div class="stat-value">{{ today_rides }}</div>
+    <div class="stat-label">Today's Rides</div>
+  </div>
+  <div class="stat-card warn">
+    <div class="stat-icon">⭐</div>
+    <div class="stat-value">{{ "%.1f"|format(driver.rating or 5.0) }}</div>
+    <div class="stat-label">Rating</div>
+  </div>
+  <div class="stat-card info">
+    <div class="stat-icon">💼</div>
+    <div class="stat-value">₹{{ "%.0f"|format(driver.wallet or 0) }}</div>
+    <div class="stat-label">Wallet</div>
+  </div>
+</div>
+
+<div class="dash-grid">
+
+  <!-- Online Toggle Card -->
+  <div class="online-hero fade-up">
+    <div class="hero-title" id="hero-title">
+      {% if driver.status == 'online' %}You're Online 🟢{% else %}You're Offline{% endif %}
+    </div>
+    <div class="hero-sub" id="hero-sub">
+      {% if driver.status == 'online' %}Riders can find and book you{% else %}Tap to start accepting rides{% endif %}
+    </div>
+    <button class="toggle-outer {% if driver.status == 'online' %}on{% endif %}"
+            id="big-toggle" onclick="doBigToggle()">
+      <div class="toggle-knob" id="toggle-knob">
+        {% if driver.status == 'online' %}🟢{% else %}⚫{% endif %}
+      </div>
+    </button>
+    <div style="font-size:.74rem;color:var(--text-3)" id="toggle-hint">
+      Tap to {% if driver.status == 'online' %}go offline{% else %}go online{% endif %}
+    </div>
+    <!-- Live poll indicator -->
+    <div id="poll-live" style="margin-top:.6rem;font-size:.72rem;color:var(--text-3);display:{% if driver.status == 'online' %}flex{% else %}none{% endif %};align-items:center;justify-content:center;gap:.35rem">
+      <span class="pulse-anim" style="width:6px;height:6px;border-radius:50%;background:var(--brand);display:inline-block"></span>
+      Scanning for ride requests...
+    </div>
+  </div>
+
+  <!-- Stats card -->
+  <div class="card card-p fade-up">
+    <div class="card-title"><i class="fa fa-chart-simple" style="color:var(--accent)"></i> All-Time Stats</div>
+    <div style="display:flex;flex-direction:column;gap:.75rem">
+      {% for label,val,color in [
+        ('Total Rides',   driver.total_rides or 0,                          'var(--text-1)'),
+        ('Total Earned', '₹'+("%.0f"|format(driver.total_earnings or 0)),   'var(--brand)'),
+        ('Vehicle',       driver.vehicle_number or '—',                     'var(--text-1)'),
+      ] %}
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:.38rem 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:.85rem;color:var(--text-3)">{{ label }}</span>
+        <span style="font-weight:700;color:{{ color }}">{{ val }}</span>
+      </div>
+      {% endfor %}
+      <a href="/earnings/" class="btn btn-secondary btn-sm" style="justify-content:center">Earnings Report →</a>
+    </div>
+  </div>
+
+  <!-- ═══ INCOMING RIDE REQUESTS ═══ (full width) -->
+  <div class="span-2 fade-up">
+    <div class="card card-p">
+      <div class="card-title" style="justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:.5rem">
+          <i class="fa fa-bell" style="color:var(--brand)"></i>
+          Incoming Ride Requests
+          <span id="req-count-badge" class="badge badge-success" style="display:none"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:.6rem">
+          <span id="last-updated" style="font-size:.7rem;color:var(--text-3)"></span>
+          <button onclick="loadRequests()" class="btn btn-secondary btn-sm" title="Refresh">
+            <i class="fa fa-rotate-right" id="refresh-icon"></i>
+          </button>
+        </div>
+      </div>
+
+      <div id="requests-area">
+        <!-- Filled by JS -->
+        <div style="text-align:center;padding:2.5rem;color:var(--text-3)">
+          <div style="font-size:2.5rem;margin-bottom:.5rem">📡</div>
+          <div style="font-size:.86rem" id="req-empty-msg">
+            {% if driver.status == 'online' %}
+              Scanning for nearby ride requests...
+            {% else %}
+              Go online to start accepting ride requests.
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Active ride (if any) -->
+  {% if active_rides %}
+  <div class="span-2 fade-up">
+    {% set r = active_rides[0] %}
+    <div class="active-card">
+      <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.75rem">
+        <span class="pulse-anim" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--brand)"></span>
+        <span style="font-family:var(--font-h);font-weight:700;font-size:.9rem">Active Ride</span>
+        <span class="badge badge-info" style="margin-left:auto">🛺 In Progress</span>
+      </div>
+      <div style="font-size:.78rem;color:var(--text-3);margin-bottom:.5rem">#{{ r._id[:8].upper() }} · {{ r.hours }}h</div>
+      <div style="margin-bottom:.9rem">
+        <div style="display:flex;align-items:center;gap:.5rem;font-size:.87rem;margin-bottom:.3rem">
+          <div style="width:8px;height:8px;border-radius:50%;background:var(--brand);flex-shrink:0"></div>
+          {{ r.pickup_address }}
+        </div>
+        {% if r.dropoff_address %}
+        <div style="display:flex;align-items:center;gap:.5rem;font-size:.87rem">
+          <div style="width:8px;height:8px;border-radius:50%;background:var(--danger);flex-shrink:0"></div>
+          {{ r.dropoff_address }}
+        </div>
+        {% endif %}
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-family:var(--font-h);font-size:1.1rem;font-weight:800;color:var(--brand)">₹{{ "%.0f"|format(r.fare) }}</span>
+        <div style="display:flex;gap:.5rem">
+          <a href="/rides/{{ r._id }}" class="btn btn-secondary btn-sm"><i class="fa fa-map"></i> Details</a>
+          <button onclick="completeRide('{{ r._id }}')" class="btn btn-primary btn-sm">
+            <i class="fa fa-flag-checkered"></i> Complete
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+'use strict';
+
+// ── State (read from server-rendered template) ────────────────────────────────
+var _online  = {{ 'true' if driver.status == 'online' else 'false' }};
+var _pollInt = null;
+var _isToggling = false;
+
+// ── Sync sidebar UI on page load ──────────────────────────────────────────────
+updateStatusUI(_online);
+
+// ── Big toggle ────────────────────────────────────────────────────────────────
+window.doBigToggle = function() {
+  if (_isToggling) return;  // prevent double-click
+  _isToggling = true;
+
+  var btn  = document.getElementById('big-toggle');
+  var knob = document.getElementById('toggle-knob');
+  btn.disabled = true;
+  knob.textContent = '⏳';
+
+  fetch('/dashboard/toggle-status', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      _isToggling = false;
+      btn.disabled = false;
+
+      if (!data.success) {
+        knob.textContent = _online ? '🟢' : '⚫';
+        alert(data.error || 'Cannot change status.');
+        return;
+      }
+
+      _online = (data.status === 'online');
+      // Update big toggle visuals
+      btn.classList.toggle('on', _online);
+      knob.textContent = _online ? '🟢' : '⚫';
+      document.getElementById('hero-title').textContent = _online ? "You're Online 🟢" : "You're Offline";
+      document.getElementById('hero-sub').textContent   = _online ? 'Riders can find and book you' : 'Tap to start accepting rides';
+      document.getElementById('toggle-hint').textContent = _online ? 'Tap to go offline' : 'Tap to go online';
+      document.getElementById('poll-live').style.display = _online ? 'flex' : 'none';
+
+      // Sync sidebar buttons
+      updateStatusUI(_online);
+
+      if (_online) {
+        startPolling();
+      } else {
+        stopPolling();
+        showOfflineState();
+      }
+    })
+    .catch(function() {
+      _isToggling = false;
+      btn.disabled = false;
+      knob.textContent = _online ? '🟢' : '⚫';
+      alert('Network error. Please check your connection.');
+    });
+};
+
+// ── Polling management ────────────────────────────────────────────────────────
+function startPolling() {
+  loadRequests();                            // immediate first call
+  stopPolling();                             // clear any existing interval
+  _pollInt = setInterval(loadRequests, 6000); // then every 6s
+}
+
+function stopPolling() {
+  if (_pollInt) {
+    clearInterval(_pollInt);
+    _pollInt = null;
+  }
+}
+
+function showOfflineState() {
+  var area = document.getElementById('requests-area');
+  var badge = document.getElementById('req-count-badge');
+  if (badge) badge.style.display = 'none';
+  if (area) area.innerHTML =
+    '<div style="text-align:center;padding:2.5rem;color:var(--text-3)">' +
+    '<div style="font-size:2.5rem;margin-bottom:.5rem">📡</div>' +
+    '<div style="font-size:.86rem">You are offline. Tap the toggle to go online.</div>' +
+    '</div>';
+}
+
+// ── Load & render incoming requests ──────────────────────────────────────────
+window.loadRequests = function() {
+  var icon = document.getElementById('refresh-icon');
+  if (icon) icon.className = 'fa fa-spinner spin';
+
+  fetch('/dashboard/api/requests')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (icon) icon.className = 'fa fa-rotate-right';
+
+      var area  = document.getElementById('requests-area');
+      var badge = document.getElementById('req-count-badge');
+      var ts    = document.getElementById('last-updated');
+      if (ts) ts.textContent = 'Updated ' + new Date().toLocaleTimeString();
+
+      if (!area) return;
+
+      // Offline response
+      if (data.offline) {
+        showOfflineState();
+        if (badge) badge.style.display = 'none';
+        return;
+      }
+
+      // No requests
+      if (!data.count) {
+        if (badge) badge.style.display = 'none';
+        area.innerHTML =
+          '<div style="text-align:center;padding:2rem;color:var(--text-3)">' +
+          '<div style="font-size:2rem;margin-bottom:.4rem">📡</div>' +
+          '<div style="font-size:.86rem">No ride requests right now. Stay online — customers are searching!</div>' +
+          '</div>';
+        return;
+      }
+
+      // Show requests
+      if (badge) {
+        badge.style.display = '';
+        badge.textContent = data.count + ' new';
+      }
+
+      area.innerHTML = data.requests.map(function(r) {
+        var assignedBadge = r.assigned
+          ? '<span class="badge badge-accent" style="margin-left:.4rem">Assigned to you</span>' : '';
+        return '<div class="req-card' + (r.assigned ? ' assigned' : '') + '" id="req-' + r._id + '">' +
+          '<div class="req-route">' +
+          '<span style="color:var(--brand)">📍</span> ' + esc(r.pickup) +
+          (r.dropoff ? ' <span style="color:var(--text-3)">→</span> <span style="color:var(--danger)">🏁</span> ' + esc(r.dropoff) : '') +
+          assignedBadge +
+          '</div>' +
+          '<div class="req-meta">' +
+          (r.customer ? '<span><i class="fa fa-user"></i> ' + esc(r.customer) + '</span>' : '') +
+          '<span><i class="fa fa-clock"></i> ' + r.hours + 'h</span>' +
+          '<span><i class="fa fa-tag"></i> ' + esc(r.type) + '</span>' +
+          (r.distance ? '<span><i class="fa fa-road"></i> ' + r.distance + 'km</span>' : '') +
+          '<span class="req-fare"><i class="fa fa-indian-rupee-sign"></i> ₹' + parseFloat(r.fare).toFixed(0) + '</span>' +
+          '</div>' +
+          '<div class="req-actions">' +
+          '<button class="btn btn-primary btn-sm" id="acc-' + r._id + '" onclick="acceptRide(\'' + r._id + '\')">' +
+          '<i class="fa fa-check"></i> Accept Ride' +
+          '</button>' +
+          '<button class="btn btn-secondary btn-sm" onclick="skipRide(\'' + r._id + '\')">' +
+          '<i class="fa fa-xmark"></i> Skip' +
+          '</button>' +
+          '</div>' +
+          '</div>';
+      }).join('');
+    })
+    .catch(function() {
+      if (icon) icon.className = 'fa fa-rotate-right';
+    });
+};
+
+// ── Accept ride ───────────────────────────────────────────────────────────────
+window.acceptRide = function(id) {
+  var btn = document.getElementById('acc-' + id);
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa fa-spinner spin"></i> Accepting...';
+  }
+  fetch('/dashboard/accept/' + id, { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.success) {
+        // Navigate to ride detail page
+        window.location.href = data.redirect;
+      } else {
+        alert(data.error || 'Could not accept ride. It may have been taken.');
+        loadRequests();
+      }
+    })
+    .catch(function() {
+      alert('Network error while accepting ride. Please try again.');
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa fa-check"></i> Accept Ride'; }
+    });
+};
+
+// ── Skip ride ─────────────────────────────────────────────────────────────────
+window.skipRide = function(id) {
+  fetch('/dashboard/reject/' + id, { method: 'POST' });
+  var card = document.getElementById('req-' + id);
+  if (card) {
+    card.style.transition = 'opacity .3s, transform .3s';
+    card.style.opacity = '0';
+    card.style.transform = 'translateX(20px)';
+    setTimeout(function() { if (card.parentNode) card.remove(); }, 300);
+  }
+};
+
+// ── Complete active ride ──────────────────────────────────────────────────────
+window.completeRide = function(id) {
+  if (!confirm('Mark this ride as completed?')) return;
+  fetch('/rides/' + id + '/status', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'completed' })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.success) location.reload();
+    else alert(data.error || 'Could not update status.');
+  });
+};
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Boot: start polling if already online ────────────────────────────────────
+if (_online) {
+  startPolling();
+}
+
+})();
+</script>
+{% endblock %}

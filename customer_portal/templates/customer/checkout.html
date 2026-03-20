@@ -1,0 +1,54 @@
+{% extends "customer/base.html" %}
+{% block title %}Pay ₹{{ "%.2f"|format(booking.fare) }} — E-TukTukGo{% endblock %}
+{% block content %}
+<div class="page-wrap-sm" style="padding-top:2rem">
+  <h1 style="font-family:var(--font-h);font-size:1.6rem;font-weight:800;margin-bottom:1.5rem">Complete Payment</h1>
+  <div class="card card-p" style="margin-bottom:1.25rem">
+    <div class="card-title"><i class="fa fa-route"></i> Booking Summary</div>
+    <div style="display:grid;gap:.5rem;font-size:.88rem">
+      <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid var(--border)"><span style="color:var(--text-3)">Booking ID</span><span style="font-weight:600">#{{ booking._id[:8].upper() }}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid var(--border)"><span style="color:var(--text-3)">Pickup</span><span style="font-weight:600;text-align:right;max-width:60%">{{ booking.pickup_address }}</span></div>
+      {% if booking.dropoff_address %}<div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid var(--border)"><span style="color:var(--text-3)">Drop</span><span style="font-weight:600">{{ booking.dropoff_address }}</span></div>{% endif %}
+      <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid var(--border)"><span style="color:var(--text-3)">Duration</span><span style="font-weight:600">{{ booking.hours }}h</span></div>
+      <div style="display:flex;justify-content:space-between;padding:.6rem 0;font-weight:800;font-size:1rem"><span>Total</span><span style="color:var(--brand);font-family:var(--font-h);font-size:1.3rem">₹{{ "%.2f"|format(booking.fare) }}</span></div>
+    </div>
+  </div>
+  <div style="background:var(--brand-lt);border:1.5px solid var(--brand);border-radius:var(--radius-lg);padding:1.25rem;text-align:center;margin-bottom:1.25rem">
+    <div style="font-size:1.5rem;margin-bottom:.5rem">🔓</div>
+    <div style="font-family:var(--font-h);font-weight:700;color:var(--brand);margin-bottom:.3rem">Driver Accepted Your Ride!</div>
+    <div style="font-size:.85rem;color:var(--text-2)">Complete payment to confirm your ride.</div>
+  </div>
+  <button onclick="openRazorpay()" id="pay-btn" class="btn btn-primary btn-xl">
+    <i class="fa fa-lock-open"></i> Pay ₹{{ "%.2f"|format(booking.fare) }} Securely
+  </button>
+  <div style="text-align:center;margin-top:.75rem;font-size:.75rem;color:var(--text-3)">
+    <i class="fa fa-shield-halved"></i> 256-bit SSL · Powered by Razorpay · UPI · Cards · Wallets
+  </div>
+  <div style="text-align:center;margin-top:1rem"><a href="/booking/{{ booking._id }}" class="btn btn-secondary btn-sm">← Back</a></div>
+</div>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script>
+function openRazorpay() {
+  const btn = document.getElementById('pay-btn');
+  btn.disabled = true; btn.innerHTML = '<i class="fa fa-spinner spin"></i> Opening...';
+  const rzp = new Razorpay({
+    key: "{{ rzp_key }}", amount: {{ (booking.fare * 100)|int }},
+    currency: "INR", name: "E-TukTukGo", description: "Ride Payment",
+    order_id: "{{ order.id }}",
+    prefill: { name: "{{ user.name }}", email: "{{ user.email }}" },
+    theme: { color: "#1E8449" },
+    handler: function(response) {
+      fetch('/payment/verify', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ razorpay_order_id: response.razorpay_order_id, razorpay_payment_id: response.razorpay_payment_id, razorpay_signature: response.razorpay_signature, booking_id: "{{ booking._id }}" })
+      }).then(r=>r.json()).then(data => {
+        if (data.success) window.location.href = data.redirect;
+        else { alert('Verification failed: ' + (data.error||'error')); btn.disabled=false; btn.innerHTML='<i class="fa fa-lock-open"></i> Pay ₹{{ "%.2f"|format(booking.fare) }} Securely'; }
+      });
+    },
+    modal: { ondismiss: () => { btn.disabled=false; btn.innerHTML='<i class="fa fa-lock-open"></i> Pay ₹{{ "%.2f"|format(booking.fare) }} Securely'; } }
+  });
+  rzp.open();
+}
+</script>
+{% endblock %}
