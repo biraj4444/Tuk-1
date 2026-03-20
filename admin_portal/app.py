@@ -32,10 +32,15 @@ def create_app():
     app.register_blueprint(admin_payments_bp, url_prefix='/payments')
     app.register_blueprint(admin_settings_bp, url_prefix='/settings')
 
-    # ── Global context: pending_count available on every admin page ──────────
+    # ── Global context: pending_count + portal URLs ──────────────────────────
     @app.context_processor
-    def inject_pending_count():
-        return {'pending_count': db.count('drivers', {'approval': 'pending'})}
+    def inject_globals():
+        return {
+            'pending_count': db.count('drivers', {'approval': 'pending'}),
+            'CUSTOMER_URL':  Config.CLIENT_APP_URL,
+            'DRIVER_URL':    Config.OWNER_APP_URL,
+            'ADMIN_URL':     Config.ADMIN_APP_URL,
+        }
 
     return app
 

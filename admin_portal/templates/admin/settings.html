@@ -37,7 +37,7 @@
   <div class="card card-p fade-up">
     <div class="card-title"><i class="fa fa-circle-info" style="color:var(--purple)"></i> Platform Info</div>
     <div style="font-size:.84rem">
-      {% for label,val in [('Customer Portal','http://127.0.0.1:5001'),('Driver Portal','http://127.0.0.1:5002'),('Admin Portal','http://127.0.0.1:5003'),('Database','db.json (JSON / MongoDB-ready)'),('Payments','Razorpay (Test Mode)'),('Auth','Google OAuth + Email'),('Maps','MapTiler GL JS')] %}
+      {% for label,val in [('Customer Portal', CUSTOMER_URL),('Driver Portal', DRIVER_URL),('Admin Portal', ADMIN_URL),('Database','db.json (JSON / MongoDB-ready)'),('Payments','Razorpay (Test Mode)'),('Auth','Google OAuth + Email'),('Maps','MapTiler GL JS')] %}
       <div style="display:flex;justify-content:space-between;padding:.38rem 0;border-bottom:1px solid var(--border)"><span style="color:var(--text-3)">{{ label }}</span><span style="font-weight:500;font-size:.8rem">{{ val }}</span></div>
       {% endfor %}
     </div>

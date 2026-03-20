@@ -1,11 +1,36 @@
 services:
+  # ── Customer Portal (Public) ─────────────────────────────────────────────
   - type: web
-    name: tuk-9
+    name: tuk-9-customer
     env: python
     region: singapore
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+
+  # ── Driver Portal ────────────────────────────────────────────────────────
+  - type: web
+    name: tuk-9-driver
+    env: python
+    region: singapore
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi_driver:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+
+  # ── Admin Portal ─────────────────────────────────────────────────────────
+  - type: web
+    name: tuk-9-admin
+    env: python
+    region: singapore
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi_admin:app --bind 0.0.0.0:$PORT
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.0"
