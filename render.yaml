@@ -2,13 +2,10 @@ services:
   - type: web
     name: tuk-9
     env: python
-    region: singapore   # closest to South/Southeast Asia
+    region: singapore
     plan: free
-    rootDir: customer_portal
-    buildCommand: pip install -r ../requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.0
-      - key: SECRET_KEY
-        generateValue: true
+        value: "3.11.0"

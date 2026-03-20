@@ -1,0 +1,25 @@
+# Secrets — never commit
+.env
+*.env
+.env.*
+
+# Database file
+db.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

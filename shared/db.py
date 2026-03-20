@@ -1,111 +1,136 @@
 """
-db.py — JSON file-based database (MongoDB-ready).
-To switch to MongoDB: set USE_MONGO=true in .env and provide MONGO_URI.
-All methods mirror pymongo's interface so migration is seamless.
+db.py — Dual-mode database: MongoDB Atlas (Render) or JSON file (Termux).
+- On Render:  set MONGO_URI env var → uses MongoDB Atlas automatically
+- On Termux:  no MONGO_URI → falls back to local db.json file
+All public methods are identical either way, so no other file needs changing.
 """
 import json, os, uuid, threading
 from datetime import datetime
-from shared.config import Config
+
+# ── Detect mode ──────────────────────────────────────────────────────────────
+MONGO_URI = os.getenv('MONGO_URI', '')
+USE_MONGO  = bool(MONGO_URI)
 
 _lock = threading.Lock()
-DB_PATH = Config.DB_PATH
 
-# ── Default schema ──────────────────────────────────────────────────────────
-_DEFAULT = {
-    "users":    [],   # customers
-    "drivers":  [],
-    "admins":   [],
-    "bookings": [],
-    "zones":    [],   # pricing zones
-    "payments": [],
-    "sessions": [],
-}
+# ── MongoDB setup ─────────────────────────────────────────────────────────────
+if USE_MONGO:
+    from pymongo import MongoClient
+    _client = MongoClient(MONGO_URI)
+    _db     = _client.get_database('etuktuk')
 
-def _load() -> dict:
-    if not os.path.exists(DB_PATH):
-        _save(_DEFAULT)
-        return _DEFAULT
-    with open(DB_PATH, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-    # ensure all collections exist
-    for k, v in _DEFAULT.items():
-        data.setdefault(k, v)
-    return data
+# ── JSON setup ────────────────────────────────────────────────────────────────
+else:
+    _BASE    = os.path.join(os.path.dirname(__file__), '..')
+    DB_PATH  = os.path.join(_BASE, 'db.json')
+    _DEFAULT = {
+        "users": [], "drivers": [], "admins": [],
+        "bookings": [], "zones": [], "payments": [], "sessions": [],
+    }
 
-def _save(data: dict):
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True) if os.path.dirname(DB_PATH) else None
-    with open(DB_PATH, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+    def _load() -> dict:
+        if not os.path.exists(DB_PATH):
+            _save(_DEFAULT.copy())
+            return _DEFAULT.copy()
+        with open(DB_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        for k, v in _DEFAULT.items():
+            data.setdefault(k, v)
+        return data
 
-# ── Low-level helpers ────────────────────────────────────────────────────────
+    def _save(data: dict):
+        dirpath = os.path.dirname(DB_PATH)
+        if dirpath:
+            os.makedirs(dirpath, exist_ok=True)
+        with open(DB_PATH, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 def _now():
     return datetime.utcnow().isoformat()
 
 def _new_id():
     return str(uuid.uuid4())
 
-# ── Public API (mirrors pymongo patterns) ────────────────────────────────────
+def _clean(doc):
+    if doc and '_id' in doc:
+        doc = dict(doc)
+        doc['_id'] = str(doc['_id'])
+    return doc
+
+# ── Public API ────────────────────────────────────────────────────────────────
 
 def find(collection: str, query: dict = None):
-    """Return list of documents matching ALL query key-values."""
-    with _lock:
-        data = _load()
-        docs = data.get(collection, [])
-    if not query:
-        return docs
-    result = []
-    for doc in docs:
-        if all(doc.get(k) == v for k, v in query.items()):
-            result.append(doc)
-    return result
+    if USE_MONGO:
+        return [_clean(d) for d in _db[collection].find(query or {})]
+    else:
+        with _lock:
+            docs = _load().get(collection, [])
+        if not query:
+            return docs
+        return [d for d in docs if all(d.get(k) == v for k, v in query.items())]
 
 def find_one(collection: str, query: dict = None):
-    results = find(collection, query)
-    return results[0] if results else None
+    if USE_MONGO:
+        doc = _db[collection].find_one(query or {})
+        return _clean(doc) if doc else None
+    else:
+        results = find(collection, query)
+        return results[0] if results else None
 
 def insert_one(collection: str, document: dict) -> dict:
-    """Insert document; auto-adds _id, created_at, updated_at."""
-    with _lock:
-        data = _load()
-        document = {
-            "_id": _new_id(),
-            "created_at": _now(),
-            "updated_at": _now(),
-            **document
-        }
-        data[collection].append(document)
-        _save(data)
+    document = {"_id": _new_id(), "created_at": _now(), "updated_at": _now(), **document}
+    if USE_MONGO:
+        _db[collection].insert_one(dict(document))
+        document['_id'] = str(document['_id'])
+    else:
+        with _lock:
+            data = _load()
+            data[collection].append(document)
+            _save(data)
     return document
 
 def update_one(collection: str, query: dict, updates: dict) -> bool:
-    """Update first matching document. Returns True if found."""
-    with _lock:
-        data = _load()
-        for doc in data[collection]:
-            if all(doc.get(k) == v for k, v in query.items()):
-                doc.update(updates)
-                doc["updated_at"] = _now()
-                _save(data)
-                return True
-    return False
+    updates['updated_at'] = _now()
+    if USE_MONGO:
+        result = _db[collection].update_one(query, {'$set': updates})
+        return result.matched_count > 0
+    else:
+        with _lock:
+            data = _load()
+            for doc in data[collection]:
+                if all(doc.get(k) == v for k, v in query.items()):
+                    doc.update(updates)
+                    _save(data)
+                    return True
+        return False
 
 def delete_one(collection: str, query: dict) -> bool:
-    """Delete first matching document. Returns True if deleted."""
-    with _lock:
-        data = _load()
-        original_len = len(data[collection])
-        data[collection] = [
-            doc for doc in data[collection]
-            if not all(doc.get(k) == v for k, v in query.items())
-        ]
-        if len(data[collection]) < original_len:
-            _save(data)
-            return True
-    return False
+    if USE_MONGO:
+        result = _db[collection].delete_one(query)
+        return result.deleted_count > 0
+    else:
+        with _lock:
+            data = _load()
+            original = len(data[collection])
+            data[collection] = [d for d in data[collection] if not all(d.get(k) == v for k, v in query.items())]
+            if len(data[collection]) < original:
+                _save(data)
+                return True
+        return False
 
 def count(collection: str, query: dict = None) -> int:
-    return len(find(collection, query))
+    if USE_MONGO:
+        return _db[collection].count_documents(query or {})
+    else:
+        return len(find(collection, query))
 
 def get_all_collections() -> dict:
-    with _lock:
-        return _load()
+    if USE_MONGO:
+        result = {}
+        for col in ['users','drivers','admins','bookings','zones','payments','sessions']:
+            result[col] = [_clean(d) for d in _db[col].find({})]
+        return result
+    else:
+        with _lock:
+            return _load()
