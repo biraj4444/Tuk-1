@@ -36,4 +36,4 @@ MAPTILER_KEY_STREET = os.environ.get('MAPTILER_KEY_STREET')
 
 # IP Info Token - For location detection
 IPINFO_TOKEN = os.environ.get('IPINFO_TOKEN')
-MONGO_URI=your_mongodb_atlas_connection_string
+MONGO_URI="YOUR_MONGODB_URI"
