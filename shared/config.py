@@ -1,3 +1,5 @@
+import os
+
 CLIENT_APP_URL = os.getenv('CLIENT_APP_URL')
 OWNER_APP_URL = os.getenv('OWNER_APP_URL')
 ADMIN_APP_URL = os.getenv('ADMIN_APP_URL')
