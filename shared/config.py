@@ -29,3 +29,10 @@ class Config:
     # V3 Advanced Features Configuration
     FEATURE_X_ENABLED = os.environ.get('FEATURE_X_ENABLED', 'False') == 'True'
     FEATURE_Y_API_KEY = os.environ.get('FEATURE_Y_API_KEY')
+
+   # Map Tiles - For Maps (MapTiler API)
+MAPTILER_KEY_SAT = os.environ.get('MAPTILER_KEY_SAT')
+MAPTILER_KEY_STREET = os.environ.get('MAPTILER_KEY_STREET')
+
+# IP Info Token - For location detection
+IPINFO_TOKEN = os.environ.get('IPINFO_TOKEN')
